@@ -1,5 +1,5 @@
 from functools import update_wrapper, wraps
-from unittest import TestCase
+import asyncio
 
 from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib.auth.decorators import (
@@ -7,7 +7,7 @@ from django.contrib.auth.decorators import (
 )
 from django.http import HttpRequest, HttpResponse, HttpResponseNotAllowed
 from django.middleware.clickjacking import XFrameOptionsMiddleware
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, TestCase
 from django.utils.decorators import method_decorator
 from django.utils.functional import keep_lazy, keep_lazy_text, lazy
 from django.utils.safestring import mark_safe
@@ -151,6 +151,26 @@ class DecoratorsTest(TestCase):
         request.method = 'DELETE'
         self.assertIsInstance(my_safe_view(request), HttpResponseNotAllowed)
 
+    async def test_async_require_http_methods_returns_coroutine(self):
+        """
+        Async Test for the require_http_methods decorator.
+        Ensures async views are awaited and returned as coroutines while
+        sync views return synchronously
+        Refs #31949.
+        """
+        self.assertTrue(require_http_methods.async_capable)
+        self.assertTrue(require_http_methods.sync_capable)
+
+        @require_http_methods(["HEAD"])
+        def my_sync_view(request):
+            return HttpResponse("OK")
+
+        @require_http_methods(["HEAD"])
+        async def my_async_view(request):
+            return HttpResponse("OK")
+
+        self.assertFalse(asyncio.iscoroutinefunction(my_sync_view))
+        self.assertTrue(asyncio.iscoroutinefunction(my_async_view))
 
 # For testing method_decorator, a decorator that assumes a single argument.
 # We will get type arguments if there is a mismatch in the number of arguments.

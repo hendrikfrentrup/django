@@ -2,19 +2,21 @@
 Decorators for views based on HTTP headers.
 """
 
+import asyncio
 from calendar import timegm
 from functools import wraps
 
 from django.http import HttpResponseNotAllowed
 from django.middleware.http import ConditionalGetMiddleware
 from django.utils.cache import get_conditional_response
-from django.utils.decorators import decorator_from_middleware
+from django.utils.decorators import decorator_from_middleware, sync_and_async_middleware
 from django.utils.http import http_date, quote_etag
 from django.utils.log import log_response
 
 conditional_page = decorator_from_middleware(ConditionalGetMiddleware)
 
 
+@sync_and_async_middleware
 def require_http_methods(request_method_list):
     """
     Decorator to make a view only accept particular request methods.  Usage::
@@ -26,9 +28,8 @@ def require_http_methods(request_method_list):
 
     Note that request methods should be in uppercase.
     """
-    def decorator(func):
-        @wraps(func)
-        def inner(request, *args, **kwargs):
+    def decorator(view_func):
+        def check_request_method(request):
             if request.method not in request_method_list:
                 response = HttpResponseNotAllowed(request_method_list)
                 log_response(
@@ -37,8 +38,27 @@ def require_http_methods(request_method_list):
                     request=request,
                 )
                 return response
-            return func(request, *args, **kwargs)
-        return inner
+
+        @wraps(view_func)
+        async def wrapped_view_async(request, *args, **kwargs):
+            not_allowed_response = check_request_method(request)
+            if not_allowed_response:
+                return not_allowed_response
+            return await view_func(request, *args, **kwargs)
+        
+        @wraps(view_func)
+        def wrapped_view_sync(request, *args, **kwargs):
+            not_allowed_response = check_request_method(request)
+            if not_allowed_response:
+                return not_allowed_response
+            return view_func(request, *args, **kwargs)
+        
+        return (
+            wrapped_view_async
+            if asyncio.iscoroutinefunction(view_func)
+            else wrapped_view_sync
+        )
+
     return decorator
 
 
